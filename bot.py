@@ -1,47 +1,50 @@
+import os
+import logging
+import asyncio
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+import aiohttp
+import json
+
+# ===== CONFIGURATION =====
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+
+# ===== LOGGING SETUP =====
+logging.basicConfig(...)
+
+# ===== TOKEN VALIDATION =====
+if not TOKEN:
+    ...
+
+logger.info(...)
+
 # ===== HELPER FUNCTIONS =====
 async def generate_image_with_gemini(prompt: str):
     """Generate image using Google Gemini API"""
-    if not GEMINI_API_KEY:
-        return None, "Gemini API key not configured."
+    # REPLACE THIS ENTIRE FUNCTION WITH THE NEW ONE ABOVE
     
-    # Use the correct model name for the Gemini API
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={GEMINI_API_KEY}"
-    
-    payload = {
-        "contents": [{
-            "parts": [{
-                "text": prompt
-            }]
-        }],
-        "generationConfig": {
-            "responseModalities": ["TEXT", "IMAGE"]  # This is required for image generation!
-        }
-    }
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    
-                    # Extract image from response
-                    if "candidates" in data and data["candidates"]:
-                        candidate = data["candidates"][0]
-                        if "content" in candidate and "parts" in candidate["content"]:
-                            for part in candidate["content"]["parts"]:
-                                if "inlineData" in part:
-                                    # Image data is base64 encoded
-                                    image_data = part["inlineData"]["data"]
-                                    return image_data, "Image generated successfully!"
-                                
-                                elif "text" in part:
-                                    # The model might return text along with the image
-                                    continue
-                    
-                    return None, "No image data found in response"
-                else:
-                    error_text = await response.text()
-                    return None, f"API Error: {response.status} - {error_text}"
-    except Exception as e:
-        logger.error(f"Gemini API Error: {str(e)}")
-        return None, f"Error: {str(e)}"
+async def generate_image_with_openai(prompt: str):
+    """Generate image using OpenAI DALL-E API"""
+    # Keep this as is
+
+async def generate_image_with_openrouter(prompt: str):
+    """Generate image using OpenRouter API"""
+    # Keep this as is
+
+# ===== BOT COMMAND HANDLERS =====
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ...
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # This function calls generate_image_with_gemini
+    ...
+
+# ===== MAIN APPLICATION =====
+def main():
+    ...
+
+if __name__ == "__main__":
+    main()
