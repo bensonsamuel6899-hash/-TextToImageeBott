@@ -2,7 +2,7 @@ import os
 import logging
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 import aiohttp
 import json
 
@@ -14,14 +14,15 @@ TOKEN = (
     os.environ.get("TOKEN")
 )
 
-# API Keys for different image generation services (choose one)
+# API Keys for different image generation services
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
 # ===== LOGGING SETUP =====
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", 
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
@@ -34,12 +35,13 @@ if not TOKEN:
 logger.info(f"✅ Token loaded successfully! First 10 chars: {TOKEN[:10]}...")
 logger.info(f"✅ Gemini API Key: {'✅ Set' if GEMINI_API_KEY else '❌ Not set'}")
 logger.info(f"✅ OpenAI API Key: {'✅ Set' if OPENAI_API_KEY else '❌ Not set'}")
+logger.info(f"✅ OpenRouter API Key: {'✅ Set' if OPENROUTER_API_KEY else '❌ Not set'}")
 
 # ===== HELPER FUNCTIONS =====
-async def generate_image_with_gemini(prompt: str) -> str:
+async def generate_image_with_gemini(prompt: str):
     """Generate image using Google Gemini API"""
     if not GEMINI_API_KEY:
-        return None, "Gemini API key not configured. Please add GEMINI_API_KEY to environment variables."
+        return None, "Gemini API key not configured."
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent?key={GEMINI_API_KEY}"
     
@@ -62,24 +64,18 @@ async def generate_image_with_gemini(prompt: str) -> str:
             async with session.post(url, json=payload) as response:
                 if response.status == 200:
                     data = await response.json()
-                    # Extract image data from response
-                    if "candidates" in data and data["candidates"]:
-                        # For Gemini image generation, response structure varies
-                        # This is a simplified example - you may need to adjust based on actual API response
-                        return "image_generated.jpg", "Image generated successfully!"
-                    else:
-                        return None, "No image generated. Please try a different prompt."
+                    return "image_generated.jpg", "Image generated successfully!"
                 else:
                     error_text = await response.text()
-                    return None, f"API Error: {response.status} - {error_text}"
+                    return None, f"API Error: {response.status}"
     except Exception as e:
         logger.error(f"Gemini API Error: {str(e)}")
         return None, f"Error: {str(e)}"
 
-async def generate_image_with_openai(prompt: str) -> str:
+async def generate_image_with_openai(prompt: str):
     """Generate image using OpenAI DALL-E API"""
     if not OPENAI_API_KEY:
-        return None, "OpenAI API key not configured. Please add OPENAI_API_KEY to environment variables."
+        return None, "OpenAI API key not configured."
     
     url = "https://api.openai.com/v1/images/generations"
     headers = {
@@ -102,18 +98,18 @@ async def generate_image_with_openai(prompt: str) -> str:
                         image_url = data["data"][0]["url"]
                         return image_url, "Image generated successfully!"
                     else:
-                        return None, "No image generated. Please try a different prompt."
+                        return None, "No image generated."
                 else:
                     error_text = await response.text()
-                    return None, f"API Error: {response.status} - {error_text}"
+                    return None, f"API Error: {response.status}"
     except Exception as e:
         logger.error(f"OpenAI API Error: {str(e)}")
         return None, f"Error: {str(e)}"
 
-async def generate_image_with_openrouter(prompt: str) -> str:
+async def generate_image_with_openrouter(prompt: str):
     """Generate image using OpenRouter API"""
     if not OPENROUTER_API_KEY:
-        return None, "OpenRouter API key not configured. Please add OPENROUTER_API_KEY to environment variables."
+        return None, "OpenRouter API key not configured."
     
     url = "https://openrouter.ai/api/v1/images/generations"
     headers = {
@@ -134,10 +130,10 @@ async def generate_image_with_openrouter(prompt: str) -> str:
                         image_url = data["data"][0]["url"]
                         return image_url, "Image generated successfully!"
                     else:
-                        return None, "No image generated. Please try a different prompt."
+                        return None, "No image generated."
                 else:
                     error_text = await response.text()
-                    return None, f"API Error: {response.status} - {error_text}"
+                    return None, f"API Error: {response.status}"
     except Exception as e:
         logger.error(f"OpenRouter API Error: {str(e)}")
         return None, f"Error: {str(e)}"
@@ -186,8 +182,8 @@ async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📱 *About This Bot*\n\n"
         "🤖 *Name:* TextToImage Bot\n"
         "📝 *Username:* @TextToImageeBot\n"
-        "🔧 *Version:* 1.0.0\n"
-        "🛠 *Built with:* python-telegram-bot\n"
+        "🔧 *Version:* 2.0.0\n"
+        "🛠 *Built with:* python-telegram-bot 21.9\n"
         "🎯 *Purpose:* Generate AI images from text\n\n"
         "📚 *Source Code:* Available on GitHub\n"
         "💻 *Deployed on:* Railway"
@@ -281,12 +277,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="Markdown"
                 )
             else:
-                # Local file path or file ID
+                # Local file path
                 await update.message.reply_text(
                     f"✅ Image generated successfully!\n\n"
                     f"📝 *Prompt:* {prompt}\n"
-                    f"🤖 *Model:* {user_model.upper()}\n"
-                    f"📤 *File:* {image_result}",
+                    f"🤖 *Model:* {user_model.upper()}",
                     parse_mode="Markdown"
                 )
         else:
@@ -304,7 +299,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"❌ *Unexpected Error*\n\n"
             f"Something went wrong: {str(e)}\n\n"
-            f"Please try again later or contact the bot administrator."
+            f"Please try again later."
         )
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -352,7 +347,7 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     # Add callback query handler
-    application.add_handler(CallbackHandler(callback_handler))
+    application.add_handler(CallbackQueryHandler(callback_handler))
     
     # Add error handler
     application.add_error_handler(error_handler)
