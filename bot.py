@@ -67,21 +67,20 @@ async def generate_with_openrouter(prompt: str):
         return None, str(e)
 
 async def generate_with_gemini(prompt: str):
-    """Generate image using Google Gemini API with Imagen 3.0"""
+    """Generate image using Google Gemini API with gemini-2.5-flash-image (Nano Banana)"""
     if not GEMINI_API_KEY:
         return None, "Gemini API key not configured."
     
-    # Use Imagen 3.0 - currently the most reliable image model
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:generateContent?key={GEMINI_API_KEY}"
+    # The correct public model for image generation - gemini-2.5-flash-image
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key={GEMINI_API_KEY}"
     
     payload = {
         "contents": [{
             "parts": [{"text": prompt}]
         }],
         "generationConfig": {
-            "responseModalities": ["TEXT", "IMAGE"],
-            "temperature": 1.0,
-            "sampleCount": 1
+            "responseModalities": ["TEXT", "IMAGE"],  # REQUIRED for image generation
+            "temperature": 1.0
         }
     }
     
@@ -90,15 +89,24 @@ async def generate_with_gemini(prompt: str):
             async with session.post(url, json=payload) as response:
                 if response.status == 200:
                     data = await response.json()
+                    
+                    # Parse the response to extract image data
                     if "candidates" in data and data["candidates"]:
-                        for part in data["candidates"][0]["content"]["parts"]:
-                            if "inlineData" in part:
-                                return part["inlineData"]["data"], None
+                        candidate = data["candidates"][0]
+                        if "content" in candidate and "parts" in candidate["content"]:
+                            for part in candidate["content"]["parts"]:
+                                if "inlineData" in part:
+                                    # Return base64 encoded image data
+                                    return part["inlineData"]["data"], None
+                                elif "text" in part:
+                                    # Handle text response if no image
+                                    continue
+                    
                     return None, "No image generated"
                 else:
                     error_text = await response.text()
-                    logger.error(f"Gemini API Error: {error_text}")
-                    return None, f"API Error: {response.status} - {error_text[:100]}"
+                    logger.error(f"Gemini API Error: {response.status} - {error_text}")
+                    return None, f"API Error: {response.status}"
     except Exception as e:
         logger.error(f"Gemini Error: {str(e)}")
         return None, str(e)
@@ -169,11 +177,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         image_data = None
         error = None
         
+        # Try the selected model with fallback
         if user_model == "openrouter" and OPENROUTER_API_KEY:
             image_data, error = await generate_with_openrouter(prompt)
             if not image_data and GEMINI_API_KEY:
                 logger.info("OpenRouter failed, trying Gemini...")
-                await processing.edit_text("⏳ Trying Gemini as fallback...")
+                await processing.edit_text("⏳ OpenRouter failed, switching to Gemini...")
                 image_data, error = await generate_with_gemini(prompt)
                 if image_data:
                     user_model = "gemini (fallback)"
@@ -181,7 +190,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             image_data, error = await generate_with_gemini(prompt)
             if not image_data and OPENROUTER_API_KEY:
                 logger.info("Gemini failed, trying OpenRouter...")
-                await processing.edit_text("⏳ Trying OpenRouter as fallback...")
+                await processing.edit_text("⏳ Gemini failed, switching to OpenRouter...")
                 image_data, error = await generate_with_openrouter(prompt)
                 if image_data:
                     user_model = "openrouter (fallback)"
@@ -204,42 +213,69 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await processing.delete()
         
         if image_data:
+            # Send the image
             if image_data.startswith("http"):
+                # URL from OpenRouter
                 await update.message.reply_photo(
                     image_data,
                     caption=f"🖼️ *Image Generated*\n📝 *Prompt:* {prompt[:100]}\n🤖 *Model:* {user_model.upper()}",
                     parse_mode="Markdown"
                 )
             else:
-                image_bytes = base64.b64decode(image_data)
-                await update.message.reply_photo(
-                    image_bytes,
-                    caption=f"🖼️ *Image Generated*\n📝 *Prompt:* {prompt[:100]}\n🤖 *Model:* {user_model.upper()}",
-                    parse_mode="Markdown"
-                )
+                # Base64 from Gemini
+                try:
+                    image_bytes = base64.b64decode(image_data)
+                    await update.message.reply_photo(
+                        image_bytes,
+                        caption=f"🖼️ *Image Generated*\n📝 *Prompt:* {prompt[:100]}\n🤖 *Model:* {user_model.upper()}",
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to decode image: {str(e)}")
+                    await update.message.reply_text(
+                        f"✅ Image generated but failed to send.\n\n📝 *Prompt:* {prompt}\n🤖 *Model:* {user_model.upper()}",
+                        parse_mode="Markdown"
+                    )
         else:
+            # Provide helpful error message
+            error_msg = error or "Unknown error"
+            
+            # Check for specific error types
+            if "404" in error_msg:
+                error_tip = "The Gemini model is not available. Please use /model and select OpenRouter."
+            elif "429" in error_msg:
+                error_tip = "Rate limit exceeded. Please wait a minute and try again."
+            elif "billing" in error_msg.lower():
+                error_tip = "API billing issue. Please check your API credits."
+            else:
+                error_tip = "Try using /model to switch between Gemini and OpenRouter."
+            
             await update.message.reply_text(
                 f"❌ *Failed to generate image*\n\n"
                 f"📝 *Prompt:* {prompt}\n"
-                f"⚠️ *Error:* {error}\n\n"
-                f"💡 Tips:\n"
-                f"• Try a simpler prompt\n"
-                f"• Use /model to switch models\n"
-                f"• Check if API key has credits",
+                f"⚠️ *Error:* {error_msg}\n\n"
+                f"💡 *Tip:* {error_tip}",
                 parse_mode="Markdown"
             )
             
     except Exception as e:
         logger.error(f"Error: {str(e)}")
         await processing.delete()
-        await update.message.reply_text(f"❌ Error: {str(e)}")
+        await update.message.reply_text(
+            f"❌ *Unexpected Error*\n\n"
+            f"{str(e)}\n\n"
+            f"Please try again later.",
+            parse_mode="Markdown"
+        )
 
 # ===== MAIN =====
 def main():
     logger.info("🚀 Starting TextToImage Bot...")
     
+    # Create the Application
     app = Application.builder().token(TOKEN).build()
     
+    # Add command handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("model", model_command))
