@@ -67,18 +67,21 @@ async def generate_with_openrouter(prompt: str):
         return None, str(e)
 
 async def generate_with_gemini(prompt: str):
-    """Generate image using Google Gemini API"""
+    """Generate image using Google Gemini API with Imagen 3.0"""
     if not GEMINI_API_KEY:
         return None, "Gemini API key not configured."
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key={GEMINI_API_KEY}"
+    # Use Imagen 3.0 - currently the most reliable image model
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:generateContent?key={GEMINI_API_KEY}"
     
     payload = {
         "contents": [{
             "parts": [{"text": prompt}]
         }],
         "generationConfig": {
-            "responseModalities": ["TEXT", "IMAGE"]
+            "responseModalities": ["TEXT", "IMAGE"],
+            "temperature": 1.0,
+            "sampleCount": 1
         }
     }
     
@@ -94,7 +97,8 @@ async def generate_with_gemini(prompt: str):
                     return None, "No image generated"
                 else:
                     error_text = await response.text()
-                    return None, f"API Error: {response.status}"
+                    logger.error(f"Gemini API Error: {error_text}")
+                    return None, f"API Error: {response.status} - {error_text[:100]}"
     except Exception as e:
         logger.error(f"Gemini Error: {str(e)}")
         return None, str(e)
@@ -130,7 +134,7 @@ async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        "🤖 *Select AI Model*",
+        "🤖 *Select AI Model*\n\nChoose which AI model to use for image generation:",
         parse_mode="Markdown",
         reply_markup=reply_markup
     )
@@ -162,7 +166,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     try:
-        # Try to generate image
         image_data = None
         error = None
         
@@ -170,6 +173,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             image_data, error = await generate_with_openrouter(prompt)
             if not image_data and GEMINI_API_KEY:
                 logger.info("OpenRouter failed, trying Gemini...")
+                await processing.edit_text("⏳ Trying Gemini as fallback...")
                 image_data, error = await generate_with_gemini(prompt)
                 if image_data:
                     user_model = "gemini (fallback)"
@@ -177,6 +181,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             image_data, error = await generate_with_gemini(prompt)
             if not image_data and OPENROUTER_API_KEY:
                 logger.info("Gemini failed, trying OpenRouter...")
+                await processing.edit_text("⏳ Trying OpenRouter as fallback...")
                 image_data, error = await generate_with_openrouter(prompt)
                 if image_data:
                     user_model = "openrouter (fallback)"
@@ -199,16 +204,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await processing.delete()
         
         if image_data:
-            # Send the image
             if image_data.startswith("http"):
-                # URL from OpenRouter
                 await update.message.reply_photo(
                     image_data,
                     caption=f"🖼️ *Image Generated*\n📝 *Prompt:* {prompt[:100]}\n🤖 *Model:* {user_model.upper()}",
                     parse_mode="Markdown"
                 )
             else:
-                # Base64 from Gemini
                 image_bytes = base64.b64decode(image_data)
                 await update.message.reply_photo(
                     image_bytes,
@@ -220,7 +222,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"❌ *Failed to generate image*\n\n"
                 f"📝 *Prompt:* {prompt}\n"
                 f"⚠️ *Error:* {error}\n\n"
-                f"💡 Try a different prompt or model with /model",
+                f"💡 Tips:\n"
+                f"• Try a simpler prompt\n"
+                f"• Use /model to switch models\n"
+                f"• Check if API key has credits",
                 parse_mode="Markdown"
             )
             
@@ -235,7 +240,6 @@ def main():
     
     app = Application.builder().token(TOKEN).build()
     
-    # Add handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("model", model_command))
